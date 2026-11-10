@@ -10,63 +10,69 @@ jobs:
     name: Cifra a PDF -> APK
     runs-on: ubuntu-latest
 
-    container:
-      image: kivy/buildozer:latest
-
     steps:
       - name: 1. Traer el codigo del repositorio
         uses: actions/checkout@v4
 
-      - name: 2. Guardar cache (acelera muchisimo los builds siguientes)
-        uses: actions/cache@v4
+      - name: 2. Python 3.11
+        uses: actions/setup-python@v5
         with:
-          path: |
-            /github/home/.buildozer
-            /root/.buildozer
-            /home/user/.buildozer
-          key: buildozer-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            buildozer-
+          python-version: "3.11"
 
-      - name: 3. Parchear la descarga que devuelve 403
+      - name: 3. Java 17 (lo necesita el SDK de Android)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 4. Diagnostico del entorno
+        run: |
+          python3 -V
+          java -version
+          echo "--- disco ---"
+          df -h /
+          echo "--- memoria y CPUs ---"
+          free -g || true
+          nproc
+
+      - name: 5. Dependencias del sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential git zip unzip autoconf automake libtool pkg-config \
+            zlib1g-dev libncurses-dev libtinfo6 cmake libffi-dev libssl-dev libltdl-dev
+
+      - name: 6. Instalar buildozer + python-for-android
+        run: |
+          python3 -m pip install --upgrade pip setuptools wheel
+          python3 -m pip install "cython<3" "buildozer==1.5.0" "python-for-android==2024.1.21"
+          python3 -c "import pythonforandroid, os; print('p4a instalado en:', os.path.dirname(pythonforandroid.__file__))"
+
+      - name: 7. Parchear liblzma (tukaani.org responde 403)
         run: |
           set -e
-          echo "== Diagnostico =="
-          echo "buildozer: $(command -v buildozer || echo NO ENCONTRADO)"
-          ls -d /home/user/.venv/lib/*/site-packages 2>/dev/null || true
-          /home/user/.venv/bin/python3 -m pip show python-for-android 2>&1 | head -4 || true
-
-          echo "== Buscando la receta liblzma =="
-          RECIPE="*pythonforandroid/recipes/liblzma/__init__.py"
-          F=""
-          for root in /home/user /usr /opt /root /github; do
-            [ -d "$root" ] || continue
-            echo "  buscando en $root ..."
-            F=$(find "$root" -path "$RECIPE" 2>/dev/null | head -1 || true)
-            [ -n "$F" ] && break
-          done
-          if [ -z "$F" ]; then
-            echo "  buscando en todo el sistema ..."
-            F=$(find / -xdev -path "$RECIPE" 2>/dev/null | head -1 || true)
-          fi
-
-          echo "receta encontrada: ${F:-NO ENCONTRADA}"
-          test -n "$F" || { echo "ERROR: no encuentro la receta liblzma"; exit 1; }
-
+          F=$(python3 -c "import pythonforandroid, os; print(os.path.join(os.path.dirname(pythonforandroid.__file__), 'recipes', 'liblzma', '__init__.py'))")
+          echo "receta: $F"
+          test -f "$F" || { echo "ERROR: no existe la receta en $F"; exit 1; }
+          cp "$F" "$F.orig"
           sed -i 's#https://tukaani.org/xz/xz-{version}.tar.gz#https://downloads.sourceforge.net/project/lzmautils/xz-{version}.tar.gz#' "$F"
-          if grep -q "sourceforge" "$F"; then
-            echo "OK: liblzma ahora baja de SourceForge"
-          else
-            echo "ERROR: el parche no se aplico (la receta cambio de formato)"
+          if ! grep -q "sourceforge" "$F"; then
+            echo "ERROR: el parche no se aplico. Contenido original:"
+            cat "$F.orig"
             exit 1
           fi
           grep -n "url = " "$F"
+          VER=$(sed -n "s/.*version = '\([^']*\)'.*/\1/p" "$F" | head -1)
+          URL="https://downloads.sourceforge.net/project/lzmautils/xz-$VER.tar.gz"
+          echo "verificando que se pueda bajar: $URL"
+          curl -sIL -o /dev/null -w "HTTP %{http_code}\n" --max-time 60 "$URL"
+          echo "OK: liblzma apunta a SourceForge (version $VER)"
 
-      - name: 4. Compilar el APK
+      - name: 8. Compilar el APK (40-70 min la primera vez)
         run: |
           buildozer -v android debug
 
-      - name: 5. Publicar el APK para descargar
+      - name: 9. Publicar el APK para descargar
         uses: actions/upload-artifact@v4
         with:
           name: Cifra-a-PDF-APK
