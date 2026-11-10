@@ -60,6 +60,17 @@ Subí el contenido de a uno y creá el workflow a mano:
    GitHub crea las carpetas solo al escribir las barras.
 4. Pegá el contenido de `.github/workflows/build-apk.yml` y confirmá.
 
+### Verificación obligatoria antes de seguir
+
+En la lista de archivos del repositorio tiene que aparecer la carpeta
+**`.github`**. Si no está, GitHub nunca va a compilar nada y la pestaña Actions
+va a quedar vacía: significa que el arrastre se salteó la carpeta oculta.
+En ese caso usá la Opción B para crearla a mano.
+
+Tiene que quedar así, en la raíz:
+
+    .github/workflows/build-apk.yml
+
 ---
 
 ## Paso 3 — Esperar la compilación
