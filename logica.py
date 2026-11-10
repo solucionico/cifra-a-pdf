@@ -35,14 +35,6 @@ try:
 except Exception:
     VERSION_HTTP = getattr(_http, "__version__", "?")
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer, Table,
-                                TableStyle, Frame, FrameBreak, PageTemplate)
-from reportlab.graphics.shapes import Circle, Drawing, Line, Rect, String
-from reportlab.pdfgen import canvas
 
 BASE = "https://www.cifraclub.com.br"
 TIMEOUT = 20
@@ -418,32 +410,191 @@ def voicing(nombre):
             posiciones.append(p + traste)
     return posiciones
 
-def crear_diagrama_acorde(nombre):
-    d = Drawing(58, 70)
-    d.add(String(29, 58, nombre, fontName='Helvetica-Bold', fontSize=9,
-                 textAnchor='middle', fillColor=colors.HexColor('#1A237E')))
+# ---------------------------------------------------------------------------
+# GENERADOR DE PDF PROPIO  (sin dependencias: Python puro de punta a punta)
+# ---------------------------------------------------------------------------
+AZUL = (26, 35, 126)
+TINTA_PDF = (34, 34, 34)
+_MM = 72.0 / 25.4              # 1 mm en puntos
+_A4_ANCHO, _A4_ALTO = 210.0, 297.0
 
-    x_ini, y_ini = 10, 12
-    w, h = 38, 40
+_HELV_BOLD = {
+    32: 0.278, 33: 0.333, 34: 0.474, 35: 0.556, 36: 0.556, 37: 0.889, 38: 0.722, 39: 0.238,
+    40: 0.333, 41: 0.333, 42: 0.389, 43: 0.584, 44: 0.278, 45: 0.333, 46: 0.278, 47: 0.278,
+    48: 0.556, 49: 0.556, 50: 0.556, 51: 0.556, 52: 0.556, 53: 0.556, 54: 0.556, 55: 0.556,
+    56: 0.556, 57: 0.556, 58: 0.333, 59: 0.333, 60: 0.584, 61: 0.584, 62: 0.584, 63: 0.611,
+    64: 0.975, 65: 0.722, 66: 0.722, 67: 0.722, 68: 0.722, 69: 0.667, 70: 0.611, 71: 0.778,
+    72: 0.722, 73: 0.278, 74: 0.556, 75: 0.722, 76: 0.611, 77: 0.833, 78: 0.722, 79: 0.778,
+    80: 0.667, 81: 0.778, 82: 0.722, 83: 0.667, 84: 0.611, 85: 0.722, 86: 0.667, 87: 0.944,
+    88: 0.667, 89: 0.667, 90: 0.611, 91: 0.333, 92: 0.278, 93: 0.333, 94: 0.584, 95: 0.556,
+    96: 0.333, 97: 0.556, 98: 0.611, 99: 0.556, 100: 0.611, 101: 0.556, 102: 0.333, 103: 0.611,
+    104: 0.611, 105: 0.278, 106: 0.278, 107: 0.556, 108: 0.278, 109: 0.889, 110: 0.611, 111: 0.611,
+    112: 0.611, 113: 0.611, 114: 0.389, 115: 0.556, 116: 0.333, 117: 0.611, 118: 0.556, 119: 0.778,
+    120: 0.556, 121: 0.556, 122: 0.500, 123: 0.389, 124: 0.280, 125: 0.389, 126: 0.584,
+}
 
-    d.add(Rect(x_ini, y_ini, w, h, fillColor=colors.white,
-               strokeColor=colors.HexColor('#333333'), strokeWidth=1))
 
+def _ancho_helv_mm(texto, tam):
+    total = 0.0
+    for ch in texto:
+        total += _HELV_BOLD.get(ord(ch), 556)
+    return total / 1000.0 * tam / _MM
+
+
+def _escape_pdf(texto):
+    """Texto -> bytes escapados para un string PDF (gana acentos, pierde nada)."""
+    b = (texto or "").encode("cp1252", "replace")
+    salida = []
+    for ch in b:
+        if ch in (0x28, 0x29, 0x5C):
+            salida.append("\\" + chr(ch))
+        elif ch < 32 or ch > 126:
+            salida.append("\\%03o" % ch)
+        else:
+            salida.append(chr(ch))
+    return "".join(salida)
+
+
+class _PDF(object):
+    """Escritor de PDF minimo: A4, texto, lineas, rectangulos y circulos."""
+
+    def __init__(self):
+        self.paginas = []
+        self.buf = None
+        self.add_page()
+
+    def add_page(self):
+        self.buf = []
+        self.paginas.append(self.buf)
+
+    def _x(self, x_mm):
+        return x_mm * _MM
+
+    def _y(self, y_mm):
+        return (_A4_ALTO - y_mm) * _MM
+
+    def texto(self, x, y, txt, fuente="F1", tam=11.0, color=TINTA_PDF):
+        if not txt:
+            return
+        self.buf.append(
+            "BT /%s %.2f Tf %.3f %.3f %.3f rg 1 0 0 1 %.2f %.2f Tm (%s) Tj ET"
+            % (fuente, tam, color[0] / 255.0, color[1] / 255.0,
+               color[2] / 255.0, self._x(x), self._y(y), _escape_pdf(txt)))
+
+    def linea(self, x1, y1, x2, y2, ancho=0.2, color=(51, 51, 51)):
+        self.buf.append(
+            "%.3f %.3f %.3f RG %.2f w %.2f %.2f m %.2f %.2f l S"
+            % (color[0] / 255.0, color[1] / 255.0, color[2] / 255.0, ancho,
+               self._x(x1), self._y(y1), self._x(x2), self._y(y2)))
+
+    def rect(self, x, y, w, h, ancho=0.35, color=(51, 51, 51)):
+        self.buf.append(
+            "%.3f %.3f %.3f RG %.2f w %.2f %.2f %.2f %.2f re S"
+            % (color[0] / 255.0, color[1] / 255.0, color[2] / 255.0, ancho,
+               self._x(x), self._y(y + h), w * _MM, h * _MM))
+
+    def circulo(self, cx, cy, r, color=AZUL):
+        k = 0.5523 * r
+        pt = lambda px, py: "%.2f %.2f" % (self._x(px), self._y(py))
+        d = "%s m " % pt(cx, cy - r)
+        d += "%s %s %s c " % (pt(cx + k, cy - r), pt(cx + r, cy - k), pt(cx + r, cy))
+        d += "%s %s %s c " % (pt(cx + r, cy + k), pt(cx + k, cy + r), pt(cx, cy + r))
+        d += "%s %s %s c " % (pt(cx - k, cy + r), pt(cx - r, cy + k), pt(cx - r, cy))
+        d += "%s %s %s c f" % (pt(cx - r, cy - k), pt(cx - k, cy - r), pt(cx, cy - r))
+        self.buf.append("%.3f %.3f %.3f rg %s"
+                        % (color[0] / 255.0, color[1] / 255.0, color[2] / 255.0, d))
+
+    def guardar(self, ruta):
+        n = len(self.paginas)
+        cont_ids, pag_ids = [], []
+        siguiente = 6
+        for _ in range(n):
+            cont_ids.append(siguiente)
+            siguiente += 1
+            pag_ids.append(siguiente)
+            siguiente += 1
+
+        objs = [None] * siguiente
+        objs[1] = "<< /Type /Catalog /Pages 2 0 R >>"
+        objs[2] = ("<< /Type /Pages /Kids [%s] /Count %d >>"
+                   % (" ".join("%d 0 R" % i for i in pag_ids), n))
+        objs[3] = ("<< /Type /Font /Subtype /Type1 /BaseFont /Courier"
+                   " /Encoding /WinAnsiEncoding >>")
+        objs[4] = ("<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold"
+                   " /Encoding /WinAnsiEncoding >>")
+        objs[5] = ("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold"
+                   " /Encoding /WinAnsiEncoding >>")
+
+        fuentes = ("<< /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >>")
+        for i, buf in enumerate(self.paginas):
+            stream = "\n".join(buf)
+            objs[cont_ids[i]] = ("<< /Length %d >>\nstream\n%s\nendstream"
+                                 % (len(stream), stream))
+            objs[pag_ids[i]] = (
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2f %.2f]"
+                " /Resources %s /Contents %d 0 R >>"
+                % (_A4_ANCHO * _MM, _A4_ALTO * _MM, fuentes, cont_ids[i]))
+
+        cabecera = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
+        partes = [cabecera]
+        pos = len(cabecera)
+        offsets = [0] * siguiente
+        for i in range(1, siguiente):
+            cuerpo = ("%d 0 obj\n%s\nendobj\n" % (i, objs[i])).encode("latin-1")
+            offsets[i] = pos
+            partes.append(cuerpo)
+            pos += len(cuerpo)
+
+        xref = pos
+        cola = ["xref\n0 %d\n" % siguiente, "0000000000 65535 f \n"]
+        for i in range(1, siguiente):
+            cola.append("%010d 00000 n \n" % offsets[i])
+        cola.append("trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n"
+                    % (siguiente, xref))
+        partes.append("".join(cola).encode("latin-1"))
+
+        with open(ruta, "wb") as f:
+            f.write(b"".join(partes))
+
+
+def compactar_linea_acordes(linea, max_len=32):
+    """Si una linea de acordes es muy larga, reduce los espacios sobrantes."""
+    if len(linea) <= max_len:
+        return linea
+    partes = re.split(r'(\s+)', linea)
+    nuevo = []
+    for p in partes:
+        if p.isspace():
+            nuevo.append("  " if len(p) > 2 else p)
+        else:
+            nuevo.append(p)
+    return "".join(nuevo)
+
+
+def _dibujar_diagrama(pdf, x, y, nombre, ancho):
+    """Dibuja un diagrama de acorde. (x, y) = esquina superior izquierda."""
+    alto = ancho * 1.12
+    x0 = x + ancho * 0.15
+    y0 = y + alto * 0.30
+    w = ancho * 0.70
+    h = alto * 0.55
+
+    pdf.texto(x + (ancho - 0.6 * 9 * len(nombre) / _MM) / 2, y + alto * 0.11,
+              nombre, fuente="F2", tam=9, color=AZUL)
+
+    pdf.rect(x0, y0, w, h, ancho=0.35, color=(51, 51, 51))
     for i in range(1, 5):
-        cx = x_ini + (w / 5) * i
-        d.add(Line(cx, y_ini, cx, y_ini + h,
-                   strokeColor=colors.HexColor('#BBBBBB'), strokeWidth=0.4))
+        pdf.linea(x0 + w / 5 * i, y0, x0 + w / 5 * i, y0 + h,
+                  ancho=0.15, color=(187, 187, 187))
     for j in range(1, 5):
-        cy = y_ini + (h / 5) * j
-        d.add(Line(x_ini, cy, x_ini + w, cy,
-                   strokeColor=colors.HexColor('#CCCCCC'), strokeWidth=0.4))
+        pdf.linea(x0, y0 + h / 5 * j, x0 + w, y0 + h / 5 * j,
+                  ancho=0.15, color=(187, 187, 187))
 
     posiciones = voicing(nombre)
     if not posiciones:
-        d.add(String(x_ini + w / 2, y_ini + h / 2 - 3, "?",
-                     fontName='Helvetica-Bold', fontSize=16, textAnchor='middle',
-                     fillColor=colors.HexColor('#999999')))
-        return d
+        pdf.texto(x0 + w / 2 - 1.5, y0 + h / 2 + 1.5, "?",
+                  fuente="F2", tam=14, color=(153, 153, 153))
+        return
 
     base = 1
     reales = [p for p in posiciones if p > 0]
@@ -452,190 +603,114 @@ def crear_diagrama_acorde(nombre):
         posiciones = [p - (base - 1) if p > 0 else p for p in posiciones]
 
     if base > 1:
-        d.add(String(x_ini - 2, y_ini + h - 6, f"{base}º", fontName='Helvetica-Bold',
-                     fontSize=6, textAnchor='end',
-                     fillColor=colors.HexColor('#555555')))
+        etiqueta = "%do" % base
+        pdf.texto(x0 - 0.8 - 0.6 * 6 * len(etiqueta) / _MM, y0 + 1.5,
+                  etiqueta, fuente="F2", tam=6, color=(85, 85, 85))
 
+    r = max(0.9, ancho * 0.045)
     for idx, traste in enumerate(posiciones):
-        cx = x_ini + (w / 5) * idx
-        if traste == 0:
-            d.add(String(cx, y_ini + h + 2, "o", fontName='Helvetica-Bold',
-                         fontSize=7, textAnchor='middle',
-                         fillColor=colors.HexColor('#333333')))
-        elif traste == -1:
-            d.add(String(cx, y_ini + h + 2, "x", fontName='Helvetica-Bold',
-                         fontSize=7, textAnchor='middle',
-                         fillColor=colors.HexColor('#D32F2F')))
+        cx = x0 + (w / 5) * idx
+        if traste == 0 or traste == -1:
+            marca = "o" if traste == 0 else "x"
+            color = (51, 51, 51) if traste == 0 else (211, 47, 47)
+            pdf.texto(cx - 0.6 * 7 / _MM / 2, y0 - 0.8, marca,
+                      fuente="F2", tam=7, color=color)
         elif 1 <= traste <= 5:
-            cy = (y_ini + h) - (h / 10) - ((traste - 1) * (h / 5))
-            d.add(Circle(cx, cy, 3.2, fillColor=colors.HexColor('#1A237E'),
-                         strokeColor=None))
-    return d
+            cy = (y0 + h) - (h / 10) - ((traste - 1) * (h / 5))
+            pdf.circulo(cx, cy, r, color=AZUL)
 
-# ---------------------------------------------------------------------------
-# GENERACIÓN DEL PDF (CON AUTO-AJUSTE Y COMPRESIÓN)
-# ---------------------------------------------------------------------------
-def compactar_linea_acordes(linea, max_len=32):
-    """
-    Si una línea de acordes supera max_len caracteres, reduce los espacios sobrantes
-    entre acordes a 1 o 2 espacios para asegurar que quede en una única línea.
-    """
-    if len(linea) <= max_len:
-        return linea
-    
-    parts = re.split(r'(\s+)', linea)
-    new_parts = []
-    for p in parts:
-        if p.isspace():
-            if len(p) > 2:
-                new_parts.append("  ")
-            else:
-                new_parts.append(p)
-        else:
-            new_parts.append(p)
-    return "".join(new_parts)
-
-def crear_paragraph_ajustado(texto, es_acorde, col_width, base_size, base_leading, font_name, text_color):
-    """
-    Ajusta dinámicamente el tamaño de fuente si la línea supera el ancho de la columna.
-    """
-    texto_eval = re.sub(r'<[^>]+>', '', texto).replace('&nbsp;', ' ')
-    dummy_canvas = canvas.Canvas(None)
-    
-    current_size = base_size
-    current_leading = base_leading
-    
-    while current_size >= 7.5:
-        width = dummy_canvas.stringWidth(texto_eval, font_name, current_size)
-        if width <= col_width or current_size == 7.5:
-            break
-        current_size -= 0.5
-        current_leading = current_size * 1.15
-
-    style = ParagraphStyle(
-        'AutoStyle',
-        fontName=font_name,
-        fontSize=current_size,
-        leading=current_leading,
-        textColor=text_color,
-        spaceAfter=1
-    )
-    
-    if es_acorde:
-        return Paragraph(f"<b>{texto}</b>", style)
-    else:
-        return Paragraph(texto, style)
 
 def generar_pdf(datos, ruta_destino, incluir_diagramas=True):
-    # Márgenes reducidos a 7mm para aprovechar al máximo la hoja A4
-    margin = 7 * mm
-    doc = SimpleDocTemplate(
-        ruta_destino, pagesize=A4,
-        leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=margin,
-        title=datos.get("titulo", "Cifra"),
-    )
+    pdf = _PDF()
 
-    page_width, page_height = A4
-    printable_width = page_width - 2 * margin
-    printable_height = page_height - 2 * margin
+    M = 7.0
+    SEP = 5.0
+    COL_W = (_A4_ANCHO - 2 * M - SEP) / 2.0
+    COL_X = (M, M + COL_W + SEP)
+    TOPE = _A4_ALTO - M
+    TOP_CUERPO = M + 21.0
+    PT = 1.0 / _MM              # punto -> mm
 
-    header_height = 20 * mm
-    body_height = printable_height - header_height
-    col_width = (printable_width - 5 * mm) / 2
-
-    frame_header = Frame(margin, margin + body_height, printable_width, header_height,
-                         id='F_Header', leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
-    frame_col1 = Frame(margin, margin, col_width, body_height,
-                       id='F_Col1', leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
-    frame_col2 = Frame(margin + col_width + 5 * mm, margin, col_width, body_height,
-                       id='F_Col2', leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
-
-    template = PageTemplate(id='TwoCol', frames=[frame_header, frame_col1, frame_col2])
-    doc.addPageTemplates([template])
-
-    styles = getSampleStyleSheet()
-
-    estilo_titulo = ParagraphStyle(
-        'TituloBanda', parent=styles['Heading1'], fontName='Helvetica-Bold',
-        fontSize=14, leading=16, alignment=1, spaceAfter=2,
-        textColor=colors.HexColor('#1A237E'))
-    estilo_sub = ParagraphStyle(
-        'SubTitulo', parent=styles['Normal'], fontName='Helvetica-Bold',
-        fontSize=14, leading=16, alignment=1, spaceAfter=6,
-        textColor=colors.HexColor('#333333'))
-    estilo_seccion = ParagraphStyle(
-        'Seccion', parent=styles['Heading2'], fontName='Helvetica-Bold',
-        fontSize=10, spaceBefore=6, spaceAfter=4,
-        textColor=colors.HexColor('#1A237E'))
-
-    story = []
-
-    # Encabezado principal
+    # --- encabezado -------------------------------------------------------
     if datos.get("artista"):
-        story.append(Paragraph(_html(datos["artista"].upper()), estilo_titulo))
-        story.append(Paragraph(_html(datos["cancion"]), estilo_sub))
+        cabecera = [(datos["artista"].upper(), AZUL),
+                    (datos["cancion"], (51, 51, 51))]
     else:
-        story.append(Paragraph(_html(datos.get("titulo", "")), estilo_titulo))
+        cabecera = [(datos.get("titulo", ""), AZUL)]
 
-    story.append(FrameBreak())
+    y_cab = M + 1
+    for texto, color in cabecera:
+        ancho = _ancho_helv_mm(texto, 14)
+        pdf.texto((_A4_ANCHO - ancho) / 2, y_cab + 5, texto,
+                  fuente="F3", tam=14, color=color)
+        y_cab += 7.5
 
-    # Procesamiento de líneas de letra y acordes
+    pdf.linea(M, y_cab + 2.5, _A4_ANCHO - M, y_cab + 2.5,
+              ancho=0.2, color=(200, 205, 215))
+
+    # --- letra y acordes en dos columnas ----------------------------------
     lineas = [l for l in datos["texto"].split("\n") if not es_tablatura(l)]
-    for idx, linea in enumerate(lineas):
-        usar_12 = (idx % 2 == 0)
-        base_size = 12.0 if usar_12 else 11.0
-        base_leading = 13.5 if usar_12 else 12.5
 
-        if es_linea_de_acordes(linea):
-            linea_comp = compactar_linea_acordes(linea, max_len=32)
-            linea_html = _html(linea_comp) or '&nbsp;'
-            p = crear_paragraph_ajustado(
-                linea_html, es_acorde=True, col_width=col_width,
-                base_size=base_size, base_leading=base_leading,
-                font_name='Courier-Bold', text_color=colors.HexColor('#0D1B6E')
-            )
-            story.append(p)
-        else:
-            linea_html = _html(linea) or '&nbsp;'
-            p = crear_paragraph_ajustado(
-                linea_html, es_acorde=False, col_width=col_width,
-                base_size=base_size, base_leading=base_leading,
-                font_name='Courier', text_color=colors.HexColor('#222222')
-            )
-            story.append(p)
+    col = 0
+    y = TOP_CUERPO
+    top = TOP_CUERPO
 
-    # Diagramas de acordes al final
+    for linea in lineas:
+        es_acorde = es_linea_de_acordes(linea)
+        texto = compactar_linea_acordes(linea, 44) if es_acorde else linea
+        if not texto:
+            texto = " "
+
+        tam = 11.5
+        ancho = 0.6 * tam * len(texto) / _MM          # Courier: ancho fijo
+        while tam > 7.0 and ancho > COL_W - 1.5:
+            tam -= 0.5
+            ancho = 0.6 * tam * len(texto) / _MM
+        salto = tam * 1.20 * PT
+
+        if y + salto > TOPE:
+            if col == 0:
+                col = 1
+                y = top
+            else:
+                pdf.add_page()
+                col = 0
+                top = M
+                y = top
+
+        pdf.texto(COL_X[col], y + tam * 0.82 * PT, texto,
+                  fuente="F2" if es_acorde else "F1", tam=tam,
+                  color=AZUL if es_acorde else TINTA_PDF)
+        y += salto
+
+    # --- diagramas de acordes al final ------------------------------------
     acordes = datos.get("acordes") or []
     if incluir_diagramas and acordes:
-        story.append(Spacer(1, 8))
-        story.append(Paragraph("Acordes utilizados", estilo_seccion))
+        ancho_celda = (_A4_ANCHO - 2 * M) / 4.0
+        d_ancho = ancho_celda * 0.78
+        alto_fila = d_ancho * 1.12 + 2.5
+        filas = (len(acordes) + 3) // 4
+        necesario = 10 + filas * alto_fila
 
-        filas, fila = [], []
-        for idx, ac in enumerate(acordes):
-            fila.append(crear_diagrama_acorde(ac))
-            if len(fila) == 4 or idx == len(acordes) - 1:
-                while len(fila) < 4:
-                    fila.append("")
-                filas.append(fila)
-                fila = []
+        if col != 0 or y + necesario > TOPE:
+            pdf.add_page()
+            col = 0
+            y = M
 
-        tabla = Table(filas, hAlign='LEFT')
-        tabla.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ]))
-        story.append(tabla)
+        y += 4
+        pdf.texto(M, y + 3, "Acordes utilizados", fuente="F3", tam=10, color=AZUL)
+        y += 7
 
-    doc.build(story)
+        for i, ac in enumerate(acordes):
+            fi, ci = divmod(i, 4)
+            _dibujar_diagrama(pdf, M + ci * ancho_celda, y + fi * alto_fila,
+                              ac, d_ancho)
+
+    pdf.guardar(ruta_destino)
     return ruta_destino
 
-def _html(texto):
-    texto = (texto.replace('&', '&amp;')
-                  .replace('<', '&lt;')
-                  .replace('>', '&gt;'))
-    return texto.replace(' ', '&nbsp;')
 
+# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # FUNCIÓN MAESTRA
 # ---------------------------------------------------------------------------
