@@ -1,0 +1,17 @@
+# Basura del build
+bin/
+.buildozer/
+.buildozer/
+__pycache__/
+*.pyc
+*.pyo
+
+# Lo que genera el programa
+CifraApp/
+*.pdf
+
+# Sistema
+.DS_Store
+Thumbs.db
+.idea/
+.venv/

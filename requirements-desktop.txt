@@ -1,0 +1,15 @@
+# Librerias para probar en la PC (Windows/Linux).
+# NO se usa para compilar el APK: eso lo hace buildozer.spec.
+#   pip install -r requirements-desktop.txt
+#   python main.py
+
+kivy==2.3.0
+requests
+urllib3
+certifi
+charset-normalizer
+idna
+beautifulsoup4
+soupsieve
+reportlab
+pillow
