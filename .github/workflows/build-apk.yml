@@ -30,15 +30,35 @@ jobs:
 
       - name: 3. Parchear la descarga que devuelve 403
         run: |
-          P4A=$(python3 -c "import pythonforandroid, os; print(os.path.dirname(pythonforandroid.__file__))")
-          echo "python-for-android instalado en: $P4A"
+          set -e
+          BZ=$(command -v buildozer || true)
+          echo "buildozer: ${BZ:-NO ENCONTRADO}"
+          test -n "$BZ" || { echo "ERROR: buildozer no esta en el PATH"; exit 1; }
+
+          PY=$(sed -n '1s/^#!//p' "$BZ" | awk '{print $1}')
+          echo "interprete declarado: $PY"
+          P4A=$("$PY" -c "import pythonforandroid, os; print(os.path.dirname(pythonforandroid.__file__))" 2>/dev/null || true)
+
+          if [ -z "$P4A" ]; then
+            VENV=$(cd "$(dirname "$BZ")/.." && pwd)
+            echo "deduciendo venv: $VENV"
+            P4A=$(ls -d "$VENV"/lib/python*/site-packages/pythonforandroid 2>/dev/null | head -1 || true)
+          fi
+
+          if [ -z "$P4A" ]; then
+            P4A=$(ls -d /usr/lib/python3*/site-packages/pythonforandroid /usr/local/lib/python3*/dist-packages/pythonforandroid 2>/dev/null | head -1 || true)
+          fi
+
+          echo "pythonforandroid: ${P4A:-NO ENCONTRADO}"
+          test -n "$P4A" || { echo "ERROR: no encuentro pythonforandroid"; exit 1; }
+
           F="$P4A/recipes/liblzma/__init__.py"
           test -f "$F" || { echo "ERROR: no existe $F"; exit 1; }
           sed -i 's#https://tukaani.org/xz/xz-{version}.tar.gz#https://downloads.sourceforge.net/project/lzmautils/xz-{version}.tar.gz#' "$F"
           if grep -q "sourceforge" "$F"; then
             echo "OK: liblzma ahora baja de SourceForge"
           else
-            echo "ERROR: el parche no se aplico. La receta cambio de formato."
+            echo "ERROR: el parche no se aplico (la receta cambio de formato)"
             exit 1
           fi
           grep -n "url = " "$F"
