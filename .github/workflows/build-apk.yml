@@ -1,5 +1,6 @@
 name: Compilar APK
 
+# Se ejecuta solo cada vez que subis cambios, o a mano desde la pestana Actions.
 on:
   push:
     branches: [ main, master ]
@@ -31,9 +32,7 @@ jobs:
           java -version
           echo "--- disco ---"
           df -h /
-          echo "--- memoria y CPUs ---"
           free -g || true
-          nproc
 
       - name: 5. Dependencias del sistema
         run: |
@@ -42,31 +41,26 @@ jobs:
             build-essential git zip unzip autoconf automake libtool pkg-config \
             zlib1g-dev libncurses-dev libtinfo6 cmake libffi-dev libssl-dev libltdl-dev
 
-      - name: 6. Instalar buildozer + python-for-android
-        run: |
-          python3 -m pip install --upgrade pip setuptools wheel
-          python3 -m pip install "cython<3" "buildozer==1.5.0" "python-for-android==2024.1.21"
-          python3 -c "import pythonforandroid, os; print('p4a instalado en:', os.path.dirname(pythonforandroid.__file__))"
-
-      - name: 7. Parchear liblzma (tukaani.org responde 403)
+      # Comprobaciones baratas: si falta algun archivo, falla en 5 segundos
+      # en lugar de dejarte esperando una hora para nada.
+      - name: 6. Verificar que los archivos esten actualizados
         run: |
           set -e
-          F=$(python3 -c "import pythonforandroid, os; print(os.path.join(os.path.dirname(pythonforandroid.__file__), 'recipes', 'liblzma', '__init__.py'))")
-          echo "receta: $F"
-          test -f "$F" || { echo "ERROR: no existe la receta en $F"; exit 1; }
-          cp "$F" "$F.orig"
-          sed -i 's#https://tukaani.org/xz/xz-{version}.tar.gz#https://downloads.sourceforge.net/project/lzmautils/xz-{version}.tar.gz#' "$F"
-          if ! grep -q "sourceforge" "$F"; then
-            echo "ERROR: el parche no se aplico. Contenido original:"
-            cat "$F.orig"
-            exit 1
+          grep -q "p4a.branch = v2024.01.21" buildozer.spec \
+            || { echo "FALTA actualizar buildozer.spec (no tiene p4a.branch)"; exit 1; }
+          if grep -q "^requirements.*reportlab" buildozer.spec; then
+            echo "ERROR: buildozer.spec todavia pide reportlab"; exit 1
           fi
-          grep -n "url = " "$F"
-          VER=$(sed -n "s/.*version = '\([^']*\)'.*/\1/p" "$F" | head -1)
-          URL="https://downloads.sourceforge.net/project/lzmautils/xz-$VER.tar.gz"
-          echo "verificando que se pueda bajar: $URL"
-          curl -sIL -o /dev/null -w "HTTP %{http_code}\n" --max-time 60 "$URL"
-          echo "OK: liblzma apunta a SourceForge (version $VER)"
+          grep -q "class _PDF" logica.py \
+            || { echo "FALTA el logica.py nuevo (generador de PDF propio)"; exit 1; }
+          grep -q "p4a.branch" buildozer.spec && echo "buildozer.spec OK"
+          echo "logica.py OK"
+
+      - name: 7. Instalar buildozer
+        run: |
+          python3 -m pip install --upgrade pip setuptools wheel
+          python3 -m pip install "cython<3" "buildozer==1.5.0"
+          buildozer --version
 
       - name: 8. Compilar el APK (40-70 min la primera vez)
         run: |
