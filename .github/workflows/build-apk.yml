@@ -17,21 +17,37 @@ jobs:
       - name: 1. Traer el codigo del repositorio
         uses: actions/checkout@v4
 
-      - name: 2. Guardar cache (acelera los builds siguientes)
+      - name: 2. Guardar cache (acelera muchisimo los builds siguientes)
         uses: actions/cache@v4
         with:
           path: |
+            /github/home/.buildozer
             /root/.buildozer
-            /root/.cache/pip
+            /home/user/.buildozer
           key: buildozer-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
             buildozer-
 
-      - name: 3. Compilar el APK
+      - name: 3. Parchear la descarga que devuelve 403
+        run: |
+          P4A=$(python3 -c "import pythonforandroid, os; print(os.path.dirname(pythonforandroid.__file__))")
+          echo "python-for-android instalado en: $P4A"
+          F="$P4A/recipes/liblzma/__init__.py"
+          test -f "$F" || { echo "ERROR: no existe $F"; exit 1; }
+          sed -i 's#https://tukaani.org/xz/xz-{version}.tar.gz#https://downloads.sourceforge.net/project/lzmautils/xz-{version}.tar.gz#' "$F"
+          if grep -q "sourceforge" "$F"; then
+            echo "OK: liblzma ahora baja de SourceForge"
+          else
+            echo "ERROR: el parche no se aplico. La receta cambio de formato."
+            exit 1
+          fi
+          grep -n "url = " "$F"
+
+      - name: 4. Compilar el APK
         run: |
           buildozer -v android debug
 
-      - name: 4. Publicar el APK para descargar
+      - name: 5. Publicar el APK para descargar
         uses: actions/upload-artifact@v4
         with:
           name: Cifra-a-PDF-APK
