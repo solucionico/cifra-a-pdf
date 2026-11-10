@@ -1,0 +1,40 @@
+name: Compilar APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    name: Cifra a PDF -> APK
+    runs-on: ubuntu-latest
+
+    container:
+      image: kivy/buildozer:latest
+
+    steps:
+      - name: 1. Traer el codigo del repositorio
+        uses: actions/checkout@v4
+
+      - name: 2. Guardar cache (acelera los builds siguientes)
+        uses: actions/cache@v4
+        with:
+          path: |
+            /root/.buildozer
+            /root/.cache/pip
+          key: buildozer-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-
+
+      - name: 3. Compilar el APK
+        run: |
+          buildozer -v android debug
+
+      - name: 4. Publicar el APK para descargar
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cifra-a-PDF-APK
+          path: bin/*.apk
+          if-no-files-found: error
+          retention-days: 30
